@@ -1,0 +1,238 @@
+# Import required libraries
+from webbrowser import open as webopen  # For opening web browser
+from AppOpener import close, open as appopen  # For opening/closing applications
+from pywhatkit import search, playonyt  # For Google searches and YouTube playback
+from dotenv import dotenv_values  # For loading environment variables
+from bs4 import BeautifulSoup  # For web scraping (not currently used)
+from rich import print  # For colorful console output
+from groq import Groq  # For AI functionality
+import webbrowser  # Web browser control
+import requests  # HTTP requests (not currently used)
+import keyboard  # For system keyboard controls
+import asyncio  # For asynchronous task handling
+import os  # For OS operations
+import subprocess  # For running subprocesses
+
+# Load environment variables from .env file
+env_vars = dotenv_values(".env")
+GroqAPIKey = env_vars.get("GroqAPIKey")  # Get API key for Groq service
+
+# Initialize Groq client if API key is available
+if GroqAPIKey:
+    client = Groq(api_key=GroqAPIKey)
+else:
+    print("[red]Warning: Groq API key not found. AI features will be disabled.[/red]")
+    client = None
+
+# System configuration constants
+USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36'
+DEFAULT_TEXT_EDITOR = 'notepad.exe'  # Default text editor for opening files
+
+def setup_data_directory():
+    """Create Data directory if it doesn't exist for storing generated content"""
+    if not os.path.exists("Data"):
+        os.makedirs("Data")
+
+def GoogleSearch(query):
+    """Perform a Google search using pywhatkit library"""
+    try:
+        search(query)  # Open default browser with search results
+        return True
+    except Exception as e:
+        print(f"[red]Error in GoogleSearch: {e}[/red]")
+        return False
+
+def Content(Topic):
+    """
+    Generate content using AI and save to file
+    Args:
+        Topic: The topic to generate content about
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not client:
+        print("[red]AI features disabled - no API key[/red]")
+        return False
+
+    setup_data_directory()  # Ensure data directory exists
+    
+    def ContentWriterAI(prompt):
+        """
+        Generate content using Groq AI
+        Args:
+            prompt: The prompt for the AI
+        Returns:
+            str: Generated content or None if error occurs
+        """
+        try:
+            # Create chat completion with Groq API
+            completion = client.chat.completions.create(
+                model="llama3-70b-8192",  # Using Llama3 70B model
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2048,  # Limit response length
+                temperature=0.7,  # Creativity setting
+                top_p=1,
+                stream=True,  # Stream response
+                stop=None
+            )
+            
+            # Process streamed response
+            answer = ""
+            for chunk in completion:
+                if chunk.choices[0].delta.content:
+                    answer += chunk.choices[0].delta.content
+            
+            return answer.replace("</s", "")  # Clean up response
+        except Exception as e:
+            print(f"[red]AI Error: {e}[/red]")
+            return None
+
+    # Get AI-generated content
+    content = ContentWriterAI(Topic)
+    if not content:
+        return False
+
+    # Create filename from topic (lowercase with underscores)
+    filename = f"Data/{Topic.lower().replace(' ', '_')}.txt"
+    try:
+        # Save content to file and open in default text editor
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(content)
+        subprocess.Popen([DEFAULT_TEXT_EDITOR, filename])
+        return True
+    except Exception as e:
+        print(f"[red]File Error: {e}[/red]")
+        return False
+
+def YouTubeSearch(query):
+    """Search YouTube for videos by opening browser with search results"""
+    try:
+        url = f"https://www.youtube.com/results?search_query={query}"
+        webbrowser.open(url)
+        return True
+    except Exception as e:
+        print(f"[red]YouTube Search Error: {e}[/red]")
+        return False
+
+def PlayYouTube(query):
+    """Play a YouTube video directly using pywhatkit"""
+    try:
+        playonyt(query)  # Opens and plays first result
+        return True
+    except Exception as e:
+        print(f"[red]YouTube Play Error: {e}[/red]")
+        return False
+
+def OpenApp(app_name):
+    """
+    Open an application or website
+    Tries to open as application first, then falls back to website
+    """
+    try:
+        # First try to open as an application using AppOpener
+        appopen(app_name, match_closest=True, throw_error=True)
+        return True
+    except Exception:
+        # If app not found, try to open as website
+        try:
+            if not app_name.startswith(('http://', 'https://')):
+                app_name = f"https://{app_name}.com"  # Add default domain
+            webbrowser.open(app_name)
+            return True
+        except Exception as e:
+            print(f"[red]Error opening {app_name}: {e}[/red]")
+            return False
+
+def CloseApp(app_name):
+    """Close an application using AppOpener or direct process kill for Chrome"""
+    try:
+        if "chrome" in app_name.lower():
+            # Special handling for Chrome
+            os.system("taskkill /f /im chrome.exe")
+        else:
+            close(app_name, match_closest=True, throw_error=True)
+        return True
+    except Exception as e:
+        print(f"[red]Error closing {app_name}: {e}[/red]")
+        return False
+
+def System(command):
+    """Execute system commands (volume control, mute, etc.) using keyboard emulation"""
+    try:
+        command = command.lower()
+        if command == "mute":
+            keyboard.press_and_release("volume mute")
+        elif command == "unmute":
+            keyboard.press_and_release("volume mute")  # Toggle mute
+        elif command == "volume up":
+            keyboard.press_and_release("volume up")
+        elif command == "volume down":
+            keyboard.press_and_release("volume down")
+        else:
+            print(f"[yellow]Unknown system command: {command}[/yellow]")
+            return False
+        return True
+    except Exception as e:
+        print(f"[red]System command error: {e}[/red]")
+        return False
+
+async def execute_command(command):
+    """
+    Execute a single command asynchronously
+    Parses command and routes to appropriate function
+    """
+    try:
+        command = command.strip().lower()
+        
+        # Command routing based on prefix
+        if command.startswith("open "):
+            return OpenApp(command[5:])
+        elif command.startswith("close "):
+            return CloseApp(command[6:])
+        elif command.startswith("play "):
+            return PlayYouTube(command[5:])
+        elif command.startswith("content "):
+            return Content(command[8:])
+        elif command.startswith("google search "):
+            return GoogleSearch(command[14:])
+        elif command.startswith("youtube search "):
+            return YouTubeSearch(command[15:])
+        elif command.startswith("system "):
+            return System(command[7:])
+        else:
+            print(f"[yellow]Unknown command: {command}[/yellow]")
+            return False
+    except Exception as e:
+        print(f"[red]Command execution error: {e}[/red]")
+        return False
+
+async def Automation(commands):
+    """
+    Execute multiple commands asynchronously
+    Args:
+        commands: List of commands to execute
+    Returns:
+        bool: True if all commands succeeded, False otherwise
+    """
+    tasks = [execute_command(cmd) for cmd in commands]  # Create task for each command
+    results = await asyncio.gather(*tasks)  # Run all commands concurrently
+    return all(results)  # Return True only if all commands succeeded
+
+if __name__ == "__main__":
+    # Test commands to demonstrate functionality
+    test_commands = [
+        "content write a leave application",  # AI-generated content
+        "open notepad",  # Open Notepad
+        "play never gonna give you up",  # Play YouTube video
+        "google search python programming",  # Google search
+        "youtube search machine learning",  # YouTube search
+        "system volume up",  # Volume control
+        "close notepad",  # Close Notepad
+        "open facebook",  # Open website
+        "open instagram",  # Open website
+        "close copilot",  # Close application
+        "open pycharm"  # Open IDE
+    ]
+    
+    # Run automation with test commands
+    asyncio.run(Automation(test_commands))
